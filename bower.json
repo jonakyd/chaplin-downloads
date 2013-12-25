@@ -1,0 +1,12 @@
+{
+  "name": "chaplin",
+  "repo": "jonakyd/chaplin-downloads",
+  "version": "0.12.1",
+  "main": "chaplin.js",
+  "scripts": [
+    "chaplin.js"
+  ],
+  "dependencies": {
+    "backbone": "1.x"
+  }
+}
