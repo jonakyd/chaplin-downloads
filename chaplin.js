@@ -1,9 +1,9 @@
 /*!
- * Chaplin 0.12.0
+ * Chaplin 1.0.0
  *
  * Chaplin may be freely distributed under the MIT license.
  * For all details and documentation:
- * http://jonakyd.org
+ * http://chaplinjs.org
  */
 
 (function(){
@@ -238,7 +238,7 @@ module.exports = mediator;
 });;loader.register('chaplin/dispatcher', function(e, r, module) {
 'use strict';
 
-var Backbone, Dispatcher, EventBroker, mediator, trailingSlash, utils, _;
+var Backbone, Dispatcher, EventBroker, mediator, utils, _;
 
 _ = loader('underscore');
 
@@ -249,8 +249,6 @@ mediator = loader('chaplin/mediator');
 utils = loader('chaplin/lib/utils');
 
 EventBroker = loader('chaplin/lib/event_broker');
-
-trailingSlash = /(\/$|\/(\?))/;
 
 module.exports = Dispatcher = (function() {
 
@@ -278,8 +276,7 @@ module.exports = Dispatcher = (function() {
     }
     this.settings = _.defaults(options, {
       controllerPath: 'controllers/',
-      controllerSuffix: '_controller',
-      trailing: false
+      controllerSuffix: '_controller'
     });
     return this.subscribeEvent('router:match', this.dispatch);
   };
@@ -292,20 +289,8 @@ module.exports = Dispatcher = (function() {
     if (!(options.query != null)) {
       options.query = {};
     }
-    if (options.changeURL !== false) {
-      options.changeURL = true;
-    }
     if (options.forceStartup !== true) {
       options.forceStartup = false;
-    }
-    if (trailingSlash.test(route.path)) {
-      if (this.settings.trailing === false) {
-        route.path = route.path.replace(trailingSlash, '$2');
-      }
-    } else {
-      if (this.settings.trailing === true) {
-        route.path += '/';
-      }
     }
     if (!options.forceStartup && ((_ref = this.currentRoute) != null ? _ref.controller : void 0) === route.controller && ((_ref1 = this.currentRoute) != null ? _ref1.action : void 0) === route.action && _.isEqual(this.currentParams, params) && _.isEqual(this.currentQuery, options.query)) {
       return;
@@ -330,18 +315,20 @@ module.exports = Dispatcher = (function() {
   };
 
   Dispatcher.prototype.controllerLoaded = function(route, params, options, Controller) {
-    var controller, previous;
-    this.nextPreviousRoute = this.currentRoute;
-    previous = _.extend({}, this.nextPreviousRoute);
-    if (this.currentParams != null) {
-      previous.params = this.currentParams;
+    var controller, prev, previous;
+    if (this.nextPreviousRoute = this.currentRoute) {
+      previous = _.extend({}, this.nextPreviousRoute);
+      if (this.currentParams != null) {
+        previous.params = this.currentParams;
+      }
+      if (previous.previous) {
+        delete previous.previous;
+      }
+      prev = {
+        previous: previous
+      };
     }
-    if (previous.previous) {
-      delete previous.previous;
-    }
-    this.nextCurrentRoute = _.extend({}, route, {
-      previous: previous
-    });
+    this.nextCurrentRoute = _.extend({}, route, prev);
     controller = new Controller(params, this.nextCurrentRoute, options);
     return this.executeBeforeAction(controller, this.nextCurrentRoute, params, options);
   };
@@ -358,7 +345,6 @@ module.exports = Dispatcher = (function() {
     if (controller.redirected) {
       return;
     }
-    this.adjustURL(route, params, options);
     return this.publishEvent('dispatcher:dispatch', this.currentController, params, route, options);
   };
 
@@ -389,17 +375,6 @@ module.exports = Dispatcher = (function() {
       return promise.then(executeAction);
     } else {
       return executeAction();
-    }
-  };
-
-  Dispatcher.prototype.adjustURL = function(route, params, options) {
-    var url;
-    if (route.path == null) {
-      return;
-    }
-    url = route.path + (route.query ? "?" + route.query : "");
-    if (options.changeURL) {
-      return mediator.execute('router:changeURL', url, options);
     }
   };
 
@@ -613,10 +588,14 @@ module.exports = Controller = (function() {
     return mediator.execute('adjustTitle', subtitle);
   };
 
-  Controller.prototype.compose = function(name) {
+  Controller.prototype.reuse = function(name) {
     var method;
     method = arguments.length === 1 ? 'retrieve' : 'compose';
     return mediator.execute.apply(mediator, ["composer:" + method].concat(__slice.call(arguments)));
+  };
+
+  Controller.prototype.compose = function() {
+    throw new Error('Controller#compose was moved to Controller#reuse');
   };
 
   Controller.prototype.redirectTo = function(pathDesc, params, options) {
@@ -1264,7 +1243,7 @@ module.exports = View = (function(_super) {
       value = events[key];
       handler = typeof value === 'function' ? value : this[value];
       if (!handler) {
-        throw new Error("Method '" + handler + "' does not exist");
+        throw new Error("Method '" + value + "' does not exist");
       }
       match = key.match(/^(\S+)\s*(.*)$/);
       eventName = "" + match[1] + ".delegateEvents" + this.cid;
@@ -2027,7 +2006,7 @@ Controller = loader('chaplin/controllers/controller');
 utils = loader('chaplin/lib/utils');
 
 module.exports = Route = (function() {
-  var escapeRegExp, optionalRegExp, paramRegExp;
+  var escapeRegExp, optionalRegExp, paramRegExp, processTrailingSlash;
 
   Route.extend = Backbone.Model.extend;
 
@@ -2038,6 +2017,21 @@ module.exports = Route = (function() {
   optionalRegExp = /\((.*?)\)/g;
 
   paramRegExp = /(?::|\*)(\w+)/g;
+
+  processTrailingSlash = function(path, trailing) {
+    switch (trailing) {
+      case true:
+        if (path.slice(-1) !== '/') {
+          path += '/';
+        }
+        break;
+      case false:
+        if (path.slice(-1) === '/') {
+          path = path.slice(0, -1);
+        }
+    }
+    return path;
+  };
 
   function Route(pattern, controller, action, options) {
     var _ref;
@@ -2097,7 +2091,7 @@ module.exports = Route = (function() {
   };
 
   Route.prototype.reverse = function(params, query) {
-    var name, queryString, url, value, _i, _j, _len, _len1, _ref, _ref1;
+    var name, queryString, raw, url, value, _i, _j, _len, _len1, _ref, _ref1;
     params = this.normalizeParams(params);
     if (params === false) {
       return false;
@@ -2116,24 +2110,14 @@ module.exports = Route = (function() {
         url = url.replace(RegExp("[:*]" + name, "g"), value);
       }
     }
-    url = url.replace(optionalRegExp, function(match, portion) {
+    raw = url.replace(optionalRegExp, function(match, portion) {
       if (portion.match(/[:*]/g)) {
         return "";
       } else {
         return portion;
       }
     });
-    switch (this.options.trailing) {
-      case true:
-        if (url.slice(-1) !== '/') {
-          url += '/';
-        }
-        break;
-      case false:
-        if (url.slice(-1) === '/') {
-          url = url.slice(0, -1);
-        }
-    }
+    url = processTrailingSlash(raw, this.options.trailing);
     if (!query) {
       return url;
     }
@@ -2212,7 +2196,7 @@ module.exports = Route = (function() {
       _this.requiredParams.push(param);
       return _this.paramCapturePattern(match);
     });
-    return this.regExp = RegExp("^" + pattern + "(?=\\?|\\/?$|\\/\\?)");
+    return this.regExp = RegExp("^" + pattern + "(?=\\/?(?=\\?|$))");
   };
 
   Route.prototype.parseOptionalPortion = function(match, optionalPortion) {
@@ -2265,6 +2249,7 @@ module.exports = Route = (function() {
         options.query = utils.queryParams.parse(query);
       }
       params = this.extractParams(path);
+      path = processTrailingSlash(path, this.options.trailing);
     }
     actionParams = _.extend({}, params, this.options.params);
     route = {
@@ -2328,15 +2313,16 @@ module.exports = Router = (function() {
     isWebFile = window.location.protocol !== 'file:';
     _.defaults(this.options, {
       pushState: isWebFile,
-      root: '/'
+      root: '/',
+      trailing: false
     });
     this.removeRoot = new RegExp('^' + utils.escapeRegExp(this.options.root) + '(#)?');
     this.subscribeEvent('!router:route', this.oldEventError);
     this.subscribeEvent('!router:routeByName', this.oldEventError);
     this.subscribeEvent('!router:changeURL', this.oldURLEventError);
+    this.subscribeEvent('dispatcher:dispatch', this.changeURL);
     mediator.setHandler('router:route', this.route, this);
     mediator.setHandler('router:reverse', this.reverse, this);
-    mediator.setHandler('router:changeURL', this.changeURL, this);
     this.createHistory();
   }
 
@@ -2346,8 +2332,7 @@ module.exports = Router = (function() {
   };
 
   Router.prototype.oldURLEventError = function() {
-    throw new Error('!router:changeURL event was removed.\
-  Use mediator.execute("router:changeURL")');
+    throw new Error('!router:changeURL event was removed.');
   };
 
   Router.prototype.createHistory = function() {
@@ -2393,6 +2378,9 @@ module.exports = Router = (function() {
       }
       _ref = target.split('#'), controller = _ref[0], action = _ref[1];
     }
+    _.defaults(options, {
+      trailing: this.options.trailing
+    });
     route = new Route(pattern, controller, action, options);
     Backbone.history.handlers.push({
       route: route,
@@ -2461,11 +2449,12 @@ module.exports = Router = (function() {
     throw new Error('Router#reverse: invalid route specified');
   };
 
-  Router.prototype.changeURL = function(url, options) {
-    var navigateOptions;
-    if (options == null) {
-      options = {};
+  Router.prototype.changeURL = function(controller, params, route, options) {
+    var navigateOptions, url;
+    if (!((route.path != null) && options.changeURL)) {
+      return;
     }
+    url = route.path + (route.query ? "?" + route.query : "");
     navigateOptions = {
       trigger: options.trigger === true,
       replace: options.replace === true
@@ -2535,7 +2524,7 @@ History = (function(_super) {
   };
 
   History.prototype.start = function(options) {
-    var atRoot, fragment, loc;
+    var atRoot, fragment, loc, _ref, _ref1;
     if (Backbone.History.started) {
       throw new Error('Backbone.history has already been started');
     }
@@ -2548,6 +2537,8 @@ History = (function(_super) {
     this._wantsPushState = Boolean(this.options.pushState);
     this._hasPushState = Boolean(this.options.pushState && this.history && this.history.pushState);
     fragment = this.getFragment();
+    routeStripper = (_ref = this.options.routeStripper) != null ? _ref : routeStripper;
+    rootStripper = (_ref1 = this.options.rootStripper) != null ? _ref1 : rootStripper;
     this.root = ('/' + this.root + '/').replace(rootStripper, '/');
     if (this._hasPushState) {
       Backbone.$(window).on('popstate', this.checkUrl);
